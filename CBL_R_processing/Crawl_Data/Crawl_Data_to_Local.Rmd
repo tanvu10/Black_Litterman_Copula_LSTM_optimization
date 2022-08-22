@@ -1,0 +1,90 @@
+---
+title: "Crawl_Data_to_Local"
+author: "HUYNH TAN VU"
+date: "3/6/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set library
+```{r}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(highcharter)
+library(tidyquant)
+library(timetk)
+library(tibbletime)
+library(quantmod)
+library(PerformanceAnalytics)
+library(scales)
+library(plotly)
+library(rvest)
+library(xml2)
+library(tibble)
+library(httr)
+library(purrr)
+library(dplyr)
+```
+
+# Crawl data
+```{r}
+#Data Preprocessing
+rm(list = ls())
+new=NULL
+id_list=c('CII','DIG','HPG',"HT1",'HSG',"GAS","GVR",'TPB','TCB','MSN')
+
+for (j in id_list){
+for (i in 1:9){
+  query_params <- list(currentPage=i,id = j)
+  parameter_response <- GET("https://www.cophieu68.vn/historyprice.php", query = query_params)
+  stock_share =read_html(parameter_response)
+  new1=html_nodes(stock_share, xpath="//table[@class='stock']") %>%
+    html_table(header = TRUE,fill=TRUE) %>% as.data.frame()
+  new1=new1[,2:13]
+  new1$symbol=j
+  new=rbind(new,new1)
+}}
+
+stock=new
+
+#column names
+colnames(stock)=c("date","Last_closed_price","absolute_price_change",
+                "Percentage_price_change", "Closed_price",
+                "Trading_Volume","Open_price","Highest_price",
+                "Lowest_price","Exchange_volume", "Foregin_buy_volume", "Foreign_sell_volume","symbol")
+
+
+#format datetime
+stock$date=as.Date(stock$date, format="%d-%m-%Y")
+
+#log_return table
+for (i in 2:12){stock[,i]=as.numeric(gsub(',', '', stock[,i]))}
+stock$Trading_Volume=as.numeric(gsub(',', '', stock$Trading_Volume))
+stock$Percentage_price_change=stock$absolute_price_change/stock$Last_closed_price
+prices=stock %>% filter(!is.na(date))
+
+prices_daily_log_returns <- prices %>%
+    group_by(symbol) %>%
+    tq_transmute(select     = Closed_price, 
+                 mutate_fun = periodReturn, 
+                 period     = "daily", 
+                 type       = "log",
+                 col_rename = "daily.returns")
+
+#prices_daily_log_returns %>% ggplot(aes(x=date, y=daily.returns, col=symbol))+geom_line()+facet_wrap(symbol~.)
+
+
+#prices_daily_log_returns
+data_wide_return <- prices_daily_log_returns %>% filter(date > "2018-06-04", date< '2022-03-01' ) %>% pivot_wider(names_from = symbol, values_from = daily.returns)
+data_wide_return
+
+```
+
+
+```{r}
+write.csv(data_wide_return, file = "/Users/tanvu10/Desktop/Thesis/BL-repo/BL-COPULA-OPTIMIZATION/output_daily_data/daily_return.csv")
+```

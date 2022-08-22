@@ -1,0 +1,162 @@
+---
+title: "fundamental_data_processing"
+author: "HUYNH TAN VU"
+date: "4/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(kableExtra)
+library(dplyr)
+```
+
+
+
+```{r}
+stock.price2 <- read.csv("/Users/tanvu10/Desktop/Thesis/BL-repo/BL-COPULA-OPTIMIZATION/output_daily_data/fundamental_data.csv",head= TRUE)
+head(stock.price2)
+```
+
+```{r}
+#MKTCAP
+Mktcap<- stock.price2 %>% select(starts_with("Mktcap"))
+Mktcap
+Mktcap <- t(as.matrix(Mktcap))
+mktcap <- as.vector(Mktcap)
+#BE/ME
+MktBM<- select(stock.price2, starts_with("BE.ME"))
+MktBM <- t(as.matrix(MktBM))
+mktbm <- as.vector(MktBM)
+
+return = select(stock.price2, starts_with("Ret"))
+return <- t(as.matrix(return))
+ret.price <- as.vector(return)
+
+# names <- c("BID","CTG","EIB","FPT","GAS","HPG","KDH","MBB","MSN","MWG","PNJ","REE","SBT","SSI","STB","VCB","VIC","VNM","DXG","PDR","KBC","PHR","HSG","AGM","DHG","TRA","TVS","VNG","JVC","NSC")
+
+names = c('ACB', 'BID', 'HSG', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'KDH', 'MBB', 'MSN', 'MWG', 'NVL', 'PDR', 'PLX', 'PNJ', 'POW', 'SAB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE', 'REE')
+
+# stock.price2
+
+
+# rep(names,3)
+newreturn <- stock.price2 %>% do(data.frame(Date = rep(.$Date,each=30),stringsAsFactors = FALSE))
+print(newreturn)
+stock.price2 %>% group_by(Date)
+
+newreturn <- newreturn %>% mutate(mkt = mktcap )
+newreturn <- newreturn %>% mutate(BE.ME = mktbm)
+newreturn <- newreturn %>% mutate(return = ret.price)
+newreturn <- newreturn %>% mutate(stock = rep(names, 1369))
+newreturn
+```
+
+
+#size sort
+```{r}
+tbl.size_breakpoints <- newreturn %>%
+  select(Date, mkt) %>%
+  group_by(Date) %>%
+  summarize(size_median = median(mkt))
+
+tbl.size_breakpoints 
+
+tbl.size_sorts <- newreturn %>%
+  left_join(tbl.size_breakpoints, by = "Date") %>%
+  mutate(size_portfolio = case_when(mkt > size_median ~ "B",
+                                    mkt <= size_median ~ "S",
+                                    TRUE ~ as.character(NA))) %>%
+  select(stock, Date, size_portfolio)
+
+
+tbl.size_sorts
+newreturn <- newreturn %>% 
+  left_join(tbl.size_sorts, by = c("stock", "Date"))
+newreturn
+
+```
+#Value short 
+```{r}
+tbl.value_breakpoints <- newreturn %>%
+  select(Date, BE.ME) %>%
+  group_by(Date) %>%
+  summarize(value_q30 = quantile(BE.ME, 0.3),
+            value_q70 = quantile(BE.ME, 0.7))
+
+tbl.value_breakpoints
+
+tbl.value_sorts <- newreturn %>%
+  left_join(tbl.value_breakpoints, by = "Date") %>%
+  mutate(value_portfolio = case_when(BE.ME > value_q70 ~ "H",
+                                     BE.ME <= value_q70 & BE.ME > value_q30 ~ "M", 
+                                     BE.ME <= value_q30 ~ "L",
+                                     TRUE ~ as.character(NA))) %>%
+  select(stock, Date, value_portfolio)
+tbl.value_sorts
+
+
+newreturn <- newreturn %>% 
+  left_join(tbl.value_sorts, by = c("stock", "Date"))
+newreturn
+```
+#SMB and HML
+```{r}
+tbl.stocks_weight <- newreturn %>%
+  select(stock, Date, mktcap_weight = mkt)
+
+tbl.stocks_weight
+
+newreturn <- newreturn %>%
+  left_join(tbl.stocks_weight, by = c("stock", "Date"))
+
+newreturn
+
+tbl.portfolios <- newreturn %>%
+  group_by(Date, size_portfolio, value_portfolio) %>%
+  summarize(ret_vw = weighted.mean(return, mktcap_weight)) %>%
+  ungroup() %>%
+  mutate(portfolio = paste0(size_portfolio, "/", value_portfolio))
+
+tbl.portfolios
+
+
+tbl.factors <- tbl.portfolios %>%
+  group_by(Date) %>%
+  summarize(smb = mean(ret_vw[portfolio %in% c("S/H", "S/M", "S/L")]) - 
+              mean(ret_vw[portfolio %in% c("B/H", "B/M", "B/L")]),
+            hml = mean(ret_vw[portfolio %in% c("S/H", "B/H")]) - 
+              mean(ret_vw[portfolio %in% c("S/L", "B/L")]))
+tbl.factors
+
+hist(tbl.factors$hml)
+```
+
+
+
+```{r}
+
+rm <- read.csv("/Users/tanvu10/Desktop/Thesis/BL-repo/BL-COPULA-OPTIMIZATION/output_daily_data/market_return.csv",header = TRUE)
+rm
+# RM1 <- read.csv("RMVN.csv",header = TRUE)
+# rr <- RM1 - rf
+# rr
+# colnames(rr)<- c("rmrf")
+```
+
+
+
+```{r}
+
+
+
+rm_smb_hml <- rm %>% left_join(tbl.factors, by = "Date")
+rm_smb_hml <- rm_smb_hml[2:nrow(rm_smb_hml),]
+write.csv(rm_smb_hml, file = "/Users/tanvu10/Desktop/Thesis/BL-repo/BL-COPULA-OPTIMIZATION/output_daily_data/rm_smb_hml.csv")
+```

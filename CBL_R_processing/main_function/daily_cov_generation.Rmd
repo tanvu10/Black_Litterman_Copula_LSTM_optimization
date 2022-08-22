@@ -1,0 +1,112 @@
+---
+title: "test"
+author: "HUYNH TAN VU"
+date: "5/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(highcharter)
+library(tidyquant)
+library(timetk)
+library(tibbletime)
+library(quantmod)
+library(PerformanceAnalytics)
+library(scales)
+library(plotly)
+library(rvest)
+library(xml2)
+library(tibble)
+library(httr)
+library(purrr)
+library(dplyr)
+
+```
+
+```{r}
+memory.limit(240000)
+FROM_TIME = '2019-01-03'
+# TO_TIME_1 = '2022-01-04'
+TO_TIME_1 = '2021-10-01'
+TO_TIME_2 = '2022-04-01'
+
+# INPUT_RETURN_DF = '/Users/tanvu10/Downloads/stock_return_df.csv'
+# INPUT_PREDICTED_DF  = '/Users/tanvu10/Downloads/stock_predition.csv'
+# OUT_GAUSS_COV = '/Users/tanvu10/Desktop/Thesis/cov_matrix/Gauss'
+# OUT_CLAYTON_COV = '/Users/tanvu10/Desktop/Thesis/cov_matrix/Clayton'
+# OUT_CONF_DF = ''
+
+
+INPUT_RETURN_DF = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_return_df.csv'
+INPUT_PREDICTED_DF  = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_prediction.csv'
+OUT_GAUSS_COV = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Gauss'
+OUT_CLAYTON_COV = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Clayton'
+OUT_GUMBEL_COV = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Gumbel'
+OUT_FRANK_COV = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Frank'
+OUT_CONF_DF = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2'
+
+
+
+daily_return = read.csv(INPUT_RETURN_DF)
+daily_return$Date=as.Date(daily_return$Date, format="%Y-%m-%d")
+daily_return = na.omit(daily_return)
+daily_return
+
+predicted_return_df = read.csv(INPUT_PREDICTED_DF)
+predicted_return_df$Date = as.Date(predicted_return_df$Date, format = "%Y-%m-%d")
+# TO_TIME_1 = '2022-03-28'
+training_datetime_set = daily_return %>% filter(Date >= TO_TIME_1 , Date <= TO_TIME_2)
+training_datetime = training_datetime_set$Date
+training_datetime
+
+
+Date_vec = c()
+Gauss_conf = c()
+Clayton_conf = c()
+
+for (i in 1:length(training_datetime)){
+  if ( (training_datetime[i] != '2021-11-04') & (training_datetime[i] != '2022-01-04') & (training_datetime[i] != '2022-03-28')){
+  print(training_datetime[i])
+  train_daily_return = daily_return %>% filter(Date >= FROM_TIME , Date < training_datetime[i])
+  
+  residual_training_table = residual_extracting(train_daily_return)
+  x_vec = predicted_return_df %>% filter(Date == training_datetime[i])
+  x_vec = as.numeric(x_vec[,2:ncol(x_vec)])
+
+  print(x_vec)
+  # Gauss_list =  calculate_copula_cov_Gauss(residual_training_table, x_vec)
+  # Gauss_cov = Gauss_list[[1]]
+  # Gauss_confidence = Gauss_list[[2]]
+  
+  # Clayton_list = calculate_copula_cov_Clayton(residual_training_table, x_vec)
+  # Clayton_cov = Clayton_list[[1]]
+  # Clayton_confidence = Clayton_list[[2]]
+  
+  
+  Frank_list = calculate_copula_cov_frank(residual_training_table, x_vec)
+  Gumbel_list = calculate_copula_cov_gumbel(residual_training_table, x_vec)
+  
+  
+  Date_vec = append(Date_vec, training_datetime[i])
+  # Gauss_conf = append(Gauss_conf, Gauss_confidence)
+  # Clayton_conf = append(Clayton_conf, Clayton_confidence)
+
+  # write.csv(Gauss_list, paste(OUT_GAUSS_COV, '/', training_datetime[i],'.csv', sep=''))
+  # write.csv(Clayton_list, paste(OUT_CLAYTON_COV, '/', training_datetime[i],'.csv', sep=''))
+  write.csv(Frank_list, paste(OUT_FRANK_COV, '/', training_datetime[i],'.csv', sep=''))
+  write.csv(Gumbel_list, paste(OUT_GUMBEL_COV, '/', training_datetime[i],'.csv', sep=''))
+  }
+}
+
+
+# confidence_df = data.frame(Date = Date_vec, Gauss_conf = Gauss_conf, Clayton_conf = Clayton_conf)
+# write.csv(confidence_df, paste(OUT_CONF_DF, '/','confidence_df.csv', sep=''))
+
+```

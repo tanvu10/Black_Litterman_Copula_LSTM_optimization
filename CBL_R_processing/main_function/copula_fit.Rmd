@@ -1,0 +1,245 @@
+---
+title: "copula_fit"
+author: "HUYNH TAN VU"
+date: "3/17/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library('xts')
+library('quantmod')
+library('tidyquant')
+library('rugarch')
+library('copula')
+library('VGAM')
+library('mistr')
+library('GoFKernel')
+# library('corr_to_cov')
+```
+
+
+```{r}
+
+#cdf fit
+fit_residuals<-function(ret){
+    set.seed(1)
+    num1=quantile(ret,0.01,names=FALSE)
+    num2=quantile(ret,0.99,names=FALSE)
+    fit_res<-GNG_fit(ret, start = c(break1 = num1, break2 =num2, mean = 0 , sd = 1 ,shape1 = 0.1, shape2 = 0.5))
+    #plot(fit_res)
+    #plot(fit_res,which='pdf')
+    #plot(fit_res,which='cdf')
+    function(x){p(distribution(fit_res),x)}
+}
+
+fit_inverse_residuals<-function(ret){
+    set.seed(1)
+    num1=quantile(ret,0.01,names=FALSE)
+    num2=quantile(ret,0.99,names=FALSE)
+    fit_res<-GNG_fit(ret, start = c(break1 = num1, break2 =num2, mean = 0 , sd = 1 ,shape1 = 0.1, shape2 = 0.5))
+    function(x){q(distribution(fit_res),x)}
+}
+
+```
+
+```{r}
+
+# head(residual_table)
+# colnames(residual_table)
+# p_function = fit_residuals(residual_table[,1])
+# p_table = p_function(residual_table[,1])
+# head(p_table)
+
+```
+
+
+```{r}
+calculate_copula_cov_Gauss<-function(data, x_pred_vector){
+    k=ncol(data)
+    cdf_list<-list()
+    inverse_cdf_list<-list()
+    
+    #Create a cdf function list
+    for(i in 1:k){cdf_list[[i]]<-fit_residuals(data[,i])}
+    
+    #Create inverse cdf function list
+    for(i in 1:k){inverse_cdf_list[[i]]<-fit_inverse_residuals(data[,i])}
+    
+    #transform x_prediction vector to u_prediction vector
+    # u_pred_vector = x_pred_vector
+    # for(i in 1:k){u_pred_vector[i]<-func_list[[i]](x_pred_vector[i])}
+    
+    #Create the uniform data (CHANGE FROM DATA TO ITS CDF)
+    U_data<-data
+    for(i in 1:k){U_data[,i]<-cdf_list[[i]](data[,i])}
+    
+    #transform x_prediction vector to u_prediction vector
+    u_pred_vector = x_pred_vector
+    for(i in 1:k){u_pred_vector[i]<-cdf_list[[i]](x_pred_vector[i])}
+    
+    #Create a simulation
+    X<-as.matrix(U_data)
+    fit_Gaussian <- fitCopula(normalCopula(dim=k), X, method = 'mpl')
+    Gaussian_model<-normalCopula(coef(fit_Gaussian),dim=k)
+
+    simulated_standardized<- rCopula(10000, copula = Gaussian_model)
+
+    #Simulate the real data
+    simulated_ret<-simulated_standardized
+    for(i in 1:k){simulated_ret[,i]<-inverse_cdf_list[[i]](simulated_standardized[,i])}
+    simulated_ret<-data.frame(simulated_ret)
+    
+    simulated_ret <- simulated_ret[!is.infinite(rowSums(simulated_ret)),]
+    colnames(simulated_ret) = colnames(data)
+    covariance<-cov(simulated_ret)
+    covariance[is.na(covariance)] = 0
+    # join_prob = prob(Gaussian_model, l = rep(0, k), u = u_pred_vector)
+    return(covariance)}
+
+
+calculate_copula_cov_Clayton<-function(data, x_pred_vector){
+    k=ncol(data)
+    func_list<-list()
+    inver_func_list<-list()
+    
+    #Create a cdf function list
+    for(i in 1:k){func_list[[i]]<-fit_residuals(data[,i])}
+    
+    #Create inverse cdf function list
+    for(i in 1:k){inver_func_list[[i]]<-fit_inverse_residuals(data[,i])}
+    
+    #Create the uniform data/ transforming each return to CDF
+    U_data<-data
+    for(i in 1:k){U_data[,i]<-func_list[[i]](data[,i])}
+
+    #transform x_prediction vector to u_prediction vector
+    # u_pred_vector = x_pred_vector
+    # for(i in 1:k){u_pred_vector[i]<-func_list[[i]](x_pred_vector[i])}
+    
+    #Create a simulation/
+    #Fit each CDF into Copula
+    X<-as.matrix(U_data)
+    fit_Clayton <- fitCopula(claytonCopula(dim=k), X, method = 'itau')
+    Clayton_model<-claytonCopula(coef(fit_Clayton),dim=k)
+
+    #Simulating from Copula function
+    simulated_standardized<- rCopula(10000, copula = Clayton_model)
+    
+    #transforming simulation cdf back to return
+    simulated_ret<-simulated_standardized
+    for(i in 1:k){simulated_ret[,i]<-inver_func_list[[i]](simulated_standardized[,i])}
+    simulated_ret<-data.frame(simulated_ret)
+    colnames(simulated_ret)<-colnames(data)
+    simulated_ret <- simulated_ret[!is.infinite(rowSums(simulated_ret)),]
+
+    covariance<-cov(simulated_ret)
+    covariance[is.na(covariance)]= 0
+    # print(u_pred_vector)
+    # join_prob = prob(Clayton_model, l = rep(0, k), u = u_pred_vector )
+    # combine_list = list(covariance, join_prob)
+    return(covariance)}
+
+
+calculate_copula_cov_gumbel<-function(data, x_pred_vector){
+    k=ncol(data)
+    func_list<-list()
+    inver_func_list<-list()
+    
+    #Create a cdf function list
+    for(i in 1:k){func_list[[i]]<-fit_residuals(data[,i])}
+    
+    #Create inverse cdf function list
+    for(i in 1:k){inver_func_list[[i]]<-fit_inverse_residuals(data[,i])}
+    
+    #Create the uniform data/ transforming each return to CDF
+    U_data<-data
+    for(i in 1:k){U_data[,i]<-func_list[[i]](data[,i])}
+
+    #transform x_prediction vector to u_prediction vector
+    # u_pred_vector = x_pred_vector
+    # for(i in 1:k){u_pred_vector[i]<-func_list[[i]](x_pred_vector[i])}
+    
+    #Create a simulation/
+    #Fit each CDF into Copula
+    X<-as.matrix(U_data)
+    fit_gumbel <- fitCopula(gumbelCopula(dim=k), X, method = 'itau')
+    gumbel_model<-gumbelCopula(coef(fit_gumbel),dim=k)
+
+    #Simulating from Copula function
+    simulated_standardized<- rCopula(10000, copula = gumbel_model)
+    
+    #transforming simulation cdf back to return
+    simulated_ret<-simulated_standardized
+    for(i in 1:k){simulated_ret[,i]<-inver_func_list[[i]](simulated_standardized[,i])}
+    simulated_ret<-data.frame(simulated_ret)
+    colnames(simulated_ret)<-colnames(data)
+    simulated_ret <- simulated_ret[!is.infinite(rowSums(simulated_ret)),]
+
+    covariance<-cov(simulated_ret)
+    covariance[is.na(covariance)]= 0
+    # print(u_pred_vector)
+    # join_prob = prob(Clayton_model, l = rep(0, k), u = u_pred_vector )
+    # combine_list = list(covariance, join_prob)
+    return(covariance)}
+
+
+calculate_copula_cov_frank<-function(data, x_pred_vector){
+    k=ncol(data)
+    func_list<-list()
+    inver_func_list<-list()
+    
+    #Create a cdf function list
+    for(i in 1:k){func_list[[i]]<-fit_residuals(data[,i])}
+    
+    #Create inverse cdf function list
+    for(i in 1:k){inver_func_list[[i]]<-fit_inverse_residuals(data[,i])}
+    
+    #Create the uniform data/ transforming each return to CDF
+    U_data<-data
+    for(i in 1:k){U_data[,i]<-func_list[[i]](data[,i])}
+
+    #transform x_prediction vector to u_prediction vector
+    # u_pred_vector = x_pred_vector
+    # for(i in 1:k){u_pred_vector[i]<-func_list[[i]](x_pred_vector[i])}
+    
+    #Create a simulation/
+    #Fit each CDF into Copula
+    X<-as.matrix(U_data)
+    fit_frank <- fitCopula(frankCopula(dim=k), X, method = 'itau')
+    frank_model<-frankCopula(coef(fit_frank),dim=k)
+
+    #Simulating from Copula function
+    simulated_standardized<- rCopula(10000, copula = frank_model)
+    
+    #transforming simulation cdf back to return
+    simulated_ret<-simulated_standardized
+    for(i in 1:k){simulated_ret[,i]<-inver_func_list[[i]](simulated_standardized[,i])}
+    simulated_ret<-data.frame(simulated_ret)
+    colnames(simulated_ret)<-colnames(data)
+    simulated_ret <- simulated_ret[!is.infinite(rowSums(simulated_ret)),]
+
+    covariance<-cov(simulated_ret)
+    covariance[is.na(covariance)]= 0
+    # print(u_pred_vector)
+    # join_prob = prob(Clayton_model, l = rep(0, k), u = u_pred_vector )
+    # combine_list = list(covariance, join_prob)
+    return(covariance)}
+
+```
+    
+```{r}
+# x_pred = rep(1, 10)
+# some_list= calculate_copula_cov_Gauss(residual_table, x_pred)
+# cov = some_list[[1]]
+# con = some_list[[2]]
+# con
+```
+
+
+
+

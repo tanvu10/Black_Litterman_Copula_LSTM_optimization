@@ -1,0 +1,80 @@
+---
+title: "main_function_residual_extraction"
+author: "HUYNH TAN VU"
+date: "3/6/2022"
+output: html_document
+---
+
+# get data
+```{r}
+daily_return = read.csv('/Users/tanvu10/Desktop/Thesis/BL-repo/BL-COPULA-OPTIMIZATION/output_daily_data/daily_return.csv')
+daily_return = daily_return[,-1]
+daily_return$date=as.Date(daily_return$date, format="%Y-%m-%d")
+(daily_return)
+```
+
+```{r}
+library(rugarch)
+```
+
+# find best ARMA order 
+```{r}
+
+optimal.order.ARMA<-function(p_max,q_max,data)
+{
+  best.aic <- Inf
+best.order <- c(0,0,0)
+for(p in 0:p_max) 
+  for(q in 0:q_max){
+  if( p == 0 && q == 0) {
+    next
+  }
+  arimaFit = tryCatch(arima(data, order=c(p, 0, q)),
+                       error=function(err) FALSE,
+                       warning=function(err) FALSE )
+  if(!is.logical(arimaFit)){
+    current.aic <- AIC(arimaFit)
+    if (current.aic < best.aic){
+      best.aic <- current.aic
+      best.order <- c(p, 0, q)
+      best.arima <- arima(data, order=best.order)
+    }
+  } 
+  else{
+    next
+  }
+}
+return(c(best.order))
+}
+```
+
+
+```{r}
+
+#test function:
+# names(daily_return)[c(2:length(names(daily_return)))]
+# for (i in 1:length(names(daily_return))){
+#   print(names(daily_return)[i])
+# }
+
+residual_extracting <- function(data_table){
+  garch <- matrix(0,nrow = nrow(data_table), ncol = ncol(data_table)-1, )
+  
+  for (i in 2:length(names(data_table))){
+    name = names(data_table)[i]
+    order_vec = optimal.order.ARMA(4,4, data_table[name])
+    garch_model <- ugarchspec(
+    mean.model=list(armaOrder=order_vec, include.mean = FALSE),
+    variance.model=list(model="iGARCH",garchOrder = c(1, 1),variance.targeting=TRUE),
+    distribution.model = "sstd")
+    garchfit<-ugarchfit(data=data_table[name],spec=garch_model)
+    garch[,i-1] = garchfit@fit$residuals
+  }
+  colnames(garch) = names(data_table)[c(2:length(names(data_table)))]
+  return(garch)
+}
+
+# residual_table = residual_extracting(daily_return)
+# (residual_table)
+
+```
