@@ -1,6 +1,6 @@
 # Black-Litterman Copula LSTM Optimization
 
-Research-oriented portfolio construction pipeline combining:
+portfolio construction pipeline combining:
 - deep learning return views (LSTM)
 - copula-based covariance estimation (R)
 - Black-Litterman posterior blending
@@ -8,7 +8,7 @@ Research-oriented portfolio construction pipeline combining:
 
 The project targets VN30-style equity universes and compares baseline vs copula-enhanced Black-Litterman strategies.
 
-## Why this project matters
+## Repository Description
 
 This repository demonstrates an end-to-end quantitative research workflow:
 1. feature engineering and return data preparation
@@ -16,8 +16,6 @@ This repository demonstrates an end-to-end quantitative research workflow:
 3. copula risk modeling
 4. portfolio optimization and backtesting
 5. parameter sensitivity analysis
-
-It is structured to support reproducibility, ablation, and resume-ready reporting.
 
 ## Repository structure
 
