@@ -1,182 +1,167 @@
-import glob
-import os
+import argparse
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from utility import BL_processing, BL_max_sharpe, normal_max_sharpe, copula_max_sharpe, sharpe, drawdown
 
-INPUT_CLAYTON_COV_FOLDER = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Clayton/*.csv'
-INPUT_GAUSSIAN_COV_FOLDER = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Gauss/*.csv'
-INPUT_FRANK_COV_FOLDER = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Frank/*.csv'
-INPUT_GUMBEL_COV_FOLDER = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Gumbel/*.csv'
-INPUT_MKT_CAP_WEIGHT = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/mkt_cap_weight.csv'
-INPUT_CONFIDENCE_DF = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/confidence_df.csv'
-INPUT_STOCK_PREDICTION_DF = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_prediction.csv'
-INPUT_STOCK_RETURN_DF = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_return_df.csv'
-INPUT_VN30INDEX = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_data_folder/VN30.csv'
-INPUT_VNINDEX = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_data_folder/VNINDEX.csv'
-
-# INPUT_CLAYTON_COV_FOLDER = '/mnt/c/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Clayton/*.csv'
-# INPUT_GAUSSIAN_COV_FOLDER = '/mnt/c/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Gauss/*.csv'
-# INPUT_FRANK_COV_FOLDER = '/mnt/c/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Frank/*.csv'
-# INPUT_GUMBEL_COV_FOLDER = '/mnt/c/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/cov_matrix/Gumbel/*.csv'
-# INPUT_MKT_CAP_WEIGHT = '/mnt/c/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/mkt_cap_weight.csv'
-# INPUT_CONFIDENCE_DF = '/mnt/c/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/confidence_df.csv'
-# INPUT_STOCK_PREDICTION_DF = '/mnt/c/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_prediction.csv'
-# INPUT_STOCK_RETURN_DF = '/mnt/c/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_return_df.csv'
+from utility import BL_max_sharpe, BL_processing, copula_max_sharpe, drawdown, normal_max_sharpe, sharpe
 
 
-mkt_cap_weight_df = pd.read_csv(f'{INPUT_MKT_CAP_WEIGHT}', index_col=0)
-# confidence_df = pd.read_csv(f'{INPUT_CONFIDENCE_DF}')
-# confidence_df = confidence_df.iloc[:, 1:]
-# confidence_df.set_index('Date', inplace=True)
-stock_prediction = pd.read_csv(f'{INPUT_STOCK_PREDICTION_DF}', index_col=0)
-stock_return_df = pd.read_csv(f'{INPUT_STOCK_RETURN_DF}', index_col=0)
-stock_return_df.dropna(inplace=True)
+@dataclass
+class BacktestConfig:
+    data_root: Path
+    upper_bound: float = 0.5
+    tau: float = 0.01
+    delta: float = 2.5
+    confidence_level: float = 0.9
 
-# start = '2021-10-20'
-VN30_index = pd.read_csv(INPUT_VN30INDEX, index_col=0)
-VNINDEX = pd.read_csv(INPUT_VNINDEX, index_col=0)
-
-VN30_index['VN30INDEX'] = (VN30_index['Close'] - VN30_index['Close'].shift(1))/VN30_index['Close'].shift(1)
-VNINDEX['VNINDEX'] = (VNINDEX['Close'] - VNINDEX['Close'].shift(1))/VNINDEX['Close'].shift(1)
-
-
-
-data_factor_folder = sorted(glob.glob(INPUT_GAUSSIAN_COV_FOLDER))  # sort datetime
-print(len(data_factor_folder))
-date_list = [os.path.splitext(os.path.basename(sub_path))[0] for sub_path in data_factor_folder]
-print(date_list)
-norm_return_list = [0]
-gauss_copula_return_list = [0]
-clayton_copula_return_list = [0]
-frank_copula_return_list = [0]
-gumbel_copula_return_list = [0]
-gauss_BL_return_list = [0]
-clayton_BL_return_list = [0]
-frank_BL_return_list = [0]
-gumbel_BL_return_list = [0]
-norm_BL_return_list = [0]
-VN30 = list(VN30_index.loc[date_list, 'VN30INDEX'])
-VN30.insert(0, 0)
-VNINDEX = list(VNINDEX.loc[date_list, 'VNINDEX'])
-VNINDEX.insert(0, 0)
-upper_bound = 0.5 #best with 0.5
-# start_index = date_list.index(start)
+    @property
+    def cov_dirs(self) -> Dict[str, Path]:
+        return {
+            "Clayton": self.data_root / "cov_matrix" / "Clayton",
+            "Gauss": self.data_root / "cov_matrix" / "Gauss",
+            "Frank": self.data_root / "cov_matrix" / "Frank",
+            "Gumbel": self.data_root / "cov_matrix" / "Gumbel",
+        }
 
 
-for date in date_list:
-    print(date)
-    current_return_df = stock_return_df.loc[:date].iloc[:-1,:]  # drop current date
-
-    clayton_prior_cov = pd.read_csv(f'{INPUT_CLAYTON_COV_FOLDER[:-6]}/{date}.csv', index_col=0)
-    clayton_prior_cov = np.array(clayton_prior_cov, dtype=np.float64)
-    # clayton_confidence_level = 1 - confidence_df['Clayton_conf'].loc[date]
-    clayton_confidence_level = 0.9
-
-    gauss_prior_cov = pd.read_csv(f'{INPUT_GAUSSIAN_COV_FOLDER[:-6]}/{date}.csv', index_col=0)
-    gauss_prior_cov = np.array(gauss_prior_cov, dtype=np.float64)
-    # gauss_confidence_level = 1 - confidence_df['Gauss_conf'].loc[date]
-    gauss_confidence_level = 0.9
-
-    frank_prior_cov = pd.read_csv(f'{INPUT_FRANK_COV_FOLDER[:-6]}/{date}.csv', index_col=0)
-    frank_prior_cov = np.array(frank_prior_cov, dtype=np.float64)
-    # frank_confidence_level = 1 - confidence_df['Gauss_conf'].loc[date]
-    frank_confidence_level = 0.9
-
-    gumbel_prior_cov = pd.read_csv(f'{INPUT_GUMBEL_COV_FOLDER[:-6]}/{date}.csv', index_col=0)
-    gumbel_prior_cov = np.array(gumbel_prior_cov, dtype=np.float64)
-    # gumbel_confidence_level = 1 - confidence_df['Gauss_conf'].loc[date]
-    gumbel_confidence_level = 0.9
-
-    mkt_weight = np.array(mkt_cap_weight_df.loc[date]).reshape(-1, 1)
-    Q = np.array(stock_prediction.loc[date]).reshape(-1, 1)
-
-    gauss_mean_BL, gauss_cov_BL = BL_processing(prior_cov=gauss_prior_cov, tau=0.01, delta=2.5, mkt_weight=mkt_weight,
-                                                confidence_level=gauss_confidence_level, Q=Q)
-
-    clayton_mean_BL, clayton_cov_BL = BL_processing(prior_cov=clayton_prior_cov, tau=0.01, delta=2.5,
-                                                    mkt_weight=mkt_weight, confidence_level=clayton_confidence_level,
-                                                    Q=Q)
-
-    frank_mean_BL, frank_cov_BL = BL_processing(prior_cov=frank_prior_cov, tau=0.01, delta=2.5,
-                                                    mkt_weight=mkt_weight, confidence_level=frank_confidence_level,
-                                                    Q=Q)
-
-    gumbel_mean_BL, gumbel_cov_BL = BL_processing(prior_cov=gumbel_prior_cov, tau=0.01, delta=2.5,
-                                                    mkt_weight=mkt_weight, confidence_level=gumbel_confidence_level,
-                                                    Q=Q)
-
-    norm_mean_BL, norm_cov_BL = BL_processing(prior_cov=(current_return_df.cov()).to_numpy(), tau=0.01, delta=2.5,
-                                                    mkt_weight=mkt_weight, confidence_level=gumbel_confidence_level,
-                                                    Q=Q)
-
-    normal_weight = normal_max_sharpe(current_return_df, upper_bound)
-
-    clayton_copula_weight = copula_max_sharpe(upperbound=upper_bound, Q=clayton_prior_cov, dataframe=current_return_df)
-    gauss_copula_weight = copula_max_sharpe(upperbound=upper_bound, Q=gauss_prior_cov, dataframe=current_return_df)
-    frank_copula_weight = copula_max_sharpe(upperbound=upper_bound, Q=frank_prior_cov, dataframe=current_return_df)
-    gumbel_copula_weight = copula_max_sharpe(upperbound=upper_bound, Q=gumbel_prior_cov, dataframe=current_return_df)
-
-    BL_gauss_weight = BL_max_sharpe(Q=gauss_cov_BL, mu=gauss_mean_BL, upperbound=upper_bound)
-    BL_clayton_weight = BL_max_sharpe(Q=clayton_cov_BL, mu=clayton_mean_BL, upperbound=upper_bound)
-    BL_frank_weight = BL_max_sharpe(Q=frank_cov_BL, mu=frank_mean_BL, upperbound=upper_bound)
-    BL_gumbel_weight = BL_max_sharpe(Q=gumbel_cov_BL, mu=gumbel_mean_BL, upperbound=upper_bound)
-    BL_norm_weight = BL_max_sharpe(Q=norm_cov_BL, mu=norm_mean_BL, upperbound=upper_bound)
-    print(normal_weight)
-    print(clayton_copula_weight)
-    print(gauss_copula_weight)
-    print(BL_gauss_weight)
-    print(BL_clayton_weight)
-
-    norm_return_list.append(stock_return_df.loc[date].dot(normal_weight))
-
-    clayton_copula_return_list.append(stock_return_df.loc[date].dot(clayton_copula_weight))
-    gauss_copula_return_list.append(stock_return_df.loc[date].dot(gauss_copula_weight))
-    frank_copula_return_list.append(stock_return_df.loc[date].dot(frank_copula_weight))
-    gumbel_copula_return_list.append(stock_return_df.loc[date].dot(gumbel_copula_weight))
-
-    clayton_BL_return_list.append(stock_return_df.loc[date].dot(BL_clayton_weight))
-    gauss_BL_return_list.append(stock_return_df.loc[date].dot(BL_gauss_weight))
-    frank_BL_return_list.append(stock_return_df.loc[date].dot(BL_frank_weight))
-    gumbel_BL_return_list.append(stock_return_df.loc[date].dot(BL_gumbel_weight))
-    norm_BL_return_list.append(stock_return_df.loc[date].dot(BL_norm_weight))
-
-date_list.insert(0, 'start')
-portfolio_dic = {
-    'Date': date_list,
-    'normal': norm_return_list,
-    # 'clayton_copula': clayton_copula_return_list,
-    # 'gauss_copula': gauss_copula_return_list,
-    # 'frank_copula': frank_copula_return_list,
-    # 'gumbel_copula': gumbel_copula_return_list,
-    'BL_clayton_copula': clayton_BL_return_list,
-    'BL_gauss_copula': gauss_BL_return_list,
-    'BL_frank_copula': frank_BL_return_list,
-    'BL_gumbel_copula': gumbel_BL_return_list,
-    'only_BL': norm_BL_return_list,
-    # 'VN30': VN30,
-    # 'VNINDEX': VNINDEX
-}
-
-stat_df = pd.DataFrame(index=['normal', 'BL_clayton_copula', 'BL_gauss_copula', 'BL_frank_copula', 'BL_gumbel_copula',
-                              'only_BL'],
-                       columns=['Sharpe', 'Average Drawdown', 'Max Drawdown'])
-
-portfolio_df = pd.DataFrame(portfolio_dic)
-portfolio_df.set_index(['Date'], inplace=True)
-
-for key in portfolio_dic.keys():
-    if key != 'Date':
-        drawdown_vec = drawdown(portfolio_df[key])
-        stat_df.loc[key, 'Sharpe'] = sharpe(portfolio_dic[key])
-        stat_df.loc[key, 'Average Drawdown'] = np.mean(drawdown_vec)
-        stat_df.loc[key, 'Max Drawdown'] = np.max(drawdown_vec)
+def _load_series(csv_path: Path, index_col: int = 0) -> pd.DataFrame:
+    return pd.read_csv(csv_path, index_col=index_col)
 
 
-print(stat_df)
+def _date_list(gauss_cov_dir: Path) -> List[str]:
+    files = sorted(gauss_cov_dir.glob("*.csv"))
+    return [file.stem for file in files]
 
-# portfolio_df.cumsum().plot()
-((portfolio_df + 1).cumprod() -1).plot()
-plt.plot()
-plt.show()
+
+def run_backtest(config: BacktestConfig, output_dir: Path, plot: bool = False) -> None:
+    mkt_cap_weight_df = _load_series(config.data_root / "mkt_cap_weight.csv")
+    stock_prediction = _load_series(config.data_root / "stock_prediction.csv")
+    stock_return_df = _load_series(config.data_root / "stock_return_df.csv").dropna()
+
+    dates = _date_list(config.cov_dirs["Gauss"])
+    if not dates:
+        raise FileNotFoundError("No covariance files found in Gauss directory.")
+
+    strategy_returns = {
+        "normal": [0.0],
+        "BL_clayton_copula": [0.0],
+        "BL_gauss_copula": [0.0],
+        "BL_frank_copula": [0.0],
+        "BL_gumbel_copula": [0.0],
+        "only_BL": [0.0],
+    }
+
+    for date in dates:
+        current_return_df = stock_return_df.loc[:date].iloc[:-1, :]
+        if current_return_df.empty:
+            continue
+
+        prior_cov = {
+            copula: pd.read_csv(path / f"{date}.csv", index_col=0).to_numpy(dtype=np.float64)
+            for copula, path in config.cov_dirs.items()
+        }
+
+        mkt_weight = np.array(mkt_cap_weight_df.loc[date]).reshape(-1, 1)
+        q_view = np.array(stock_prediction.loc[date]).reshape(-1, 1)
+
+        bl_results = {}
+        for copula, cov in prior_cov.items():
+            bl_results[copula] = BL_processing(
+                prior_cov=cov,
+                tau=config.tau,
+                delta=config.delta,
+                mkt_weight=mkt_weight,
+                confidence_level=config.confidence_level,
+                Q=q_view,
+            )
+
+        norm_mean_bl, norm_cov_bl = BL_processing(
+            prior_cov=current_return_df.cov().to_numpy(dtype=np.float64),
+            tau=config.tau,
+            delta=config.delta,
+            mkt_weight=mkt_weight,
+            confidence_level=config.confidence_level,
+            Q=q_view,
+        )
+
+        normal_weight = normal_max_sharpe(current_return_df, config.upper_bound)
+        strategy_returns["normal"].append(float(stock_return_df.loc[date].dot(normal_weight)))
+
+        copula_to_key = {
+            "Clayton": "BL_clayton_copula",
+            "Gauss": "BL_gauss_copula",
+            "Frank": "BL_frank_copula",
+            "Gumbel": "BL_gumbel_copula",
+        }
+
+        for copula, key in copula_to_key.items():
+            mu_bl, cov_bl = bl_results[copula]
+            bl_weight = BL_max_sharpe(upperbound=config.upper_bound, Q=cov_bl, mu=mu_bl)
+            strategy_returns[key].append(float(stock_return_df.loc[date].dot(bl_weight)))
+
+        only_bl_weight = BL_max_sharpe(upperbound=config.upper_bound, Q=norm_cov_bl, mu=norm_mean_bl)
+        strategy_returns["only_BL"].append(float(stock_return_df.loc[date].dot(only_bl_weight)))
+
+        # Also solve copula-only portfolios to keep methodology complete.
+        _ = {
+            copula: copula_max_sharpe(
+                upperbound=config.upper_bound,
+                Q=prior_cov[copula],
+                dataframe=current_return_df,
+            )
+            for copula in prior_cov
+        }
+
+    indexed_dates = ["start"] + dates[: len(strategy_returns["normal"]) - 1]
+    portfolio_df = pd.DataFrame({"Date": indexed_dates, **strategy_returns}).set_index("Date")
+
+    stat_index = list(strategy_returns.keys())
+    stat_df = pd.DataFrame(index=stat_index, columns=["Sharpe", "Average Drawdown", "Max Drawdown"])
+
+    for strategy in stat_index:
+        dd = drawdown(portfolio_df[strategy])
+        stat_df.loc[strategy, "Sharpe"] = sharpe(portfolio_df[strategy])
+        stat_df.loc[strategy, "Average Drawdown"] = float(np.mean(dd))
+        stat_df.loc[strategy, "Max Drawdown"] = float(np.max(dd))
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    portfolio_df.to_csv(output_dir / "portfolio_returns.csv")
+    stat_df.to_csv(output_dir / "portfolio_stats.csv")
+
+    if plot:
+        ((portfolio_df + 1).cumprod() - 1).plot(figsize=(12, 6), title="Cumulative Strategy Returns")
+        plt.tight_layout()
+        plt.savefig(output_dir / "cumulative_returns.png", dpi=200)
+        plt.close()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run Black-Litterman + Copula portfolio backtest")
+    parser.add_argument("--data-root", type=Path, default=Path("data_v2"), help="Folder containing prepared CSV inputs")
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs"), help="Folder to save backtest outputs")
+    parser.add_argument("--upper-bound", type=float, default=0.5)
+    parser.add_argument("--tau", type=float, default=0.01)
+    parser.add_argument("--delta", type=float, default=2.5)
+    parser.add_argument("--confidence-level", type=float, default=0.9)
+    parser.add_argument("--plot", action="store_true", help="Save cumulative return plot")
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    config = BacktestConfig(
+        data_root=args.data_root,
+        upper_bound=args.upper_bound,
+        tau=args.tau,
+        delta=args.delta,
+        confidence_level=args.confidence_level,
+    )
+    run_backtest(config=config, output_dir=args.output_dir, plot=args.plot)
+
+
+if __name__ == "__main__":
+    main()

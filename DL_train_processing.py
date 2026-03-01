@@ -1,39 +1,76 @@
+import argparse
+from pathlib import Path
+
 import pandas as pd
-from utility import stock_list, base_index
+
 from LTSM_train import DL_train
+from utility import STOCK_LIST
 
-INPUT_STOCK_DATA_DL_FOLDER = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2/stock_data_DL_folder'
-OUTPUT_STOCK_PREDICTION_FILE = 'C:/Users/Tan Vu/Desktop/thesis/Copula_BL/data_v2'
-start_date = '2021-10-01'
-end_date = '2022-04-01'
 
-combine_dict = {}
+def generate_predictions(
+    data_root: Path,
+    start_date: str,
+    end_date: str,
+    time_step: int,
+    epochs: int,
+    batch_size: int,
+) -> pd.DataFrame:
+    input_stock_data_dl_folder = data_root / "stock_data_DL_folder"
 
-for stock in stock_list:
-    stock_df = pd.read_csv(f'{INPUT_STOCK_DATA_DL_FOLDER}/{stock}.csv')
-    stock_df.merge(pd.DataFrame(index=base_index), how='right', on='Date')
-    stock_df['Date'] = stock_df['Date'].apply(pd.Timestamp)
-    stock_df.set_index('Date', inplace=True)
+    combine_dict = {}
 
-    combine_dict[stock] = {
-        f'{stock}_pred': [],
-        'Date': []
-    }
+    for stock in STOCK_LIST:
+        stock_df = pd.read_csv(input_stock_data_dl_folder / f"{stock}.csv")
+        stock_df["Date"] = stock_df["Date"].apply(pd.Timestamp)
+        stock_df.set_index("Date", inplace=True)
 
-    for dt in pd.bdate_range(start_date, end_date, freq='B'):
-        train_df = stock_df[stock_df.index < dt]
-        print(train_df)
-        prediction = DL_train(train_df)
-        combine_dict[stock][f'{stock}_pred'].append(prediction)
-        combine_dict[stock]['Date'].append(dt)
+        combine_dict[stock] = {f"{stock}_pred": [], "Date": []}
 
-cur_df = pd.DataFrame(combine_dict[stock_list[0]])
-cur_df.set_index('Date', inplace=True)
-cur_df.index.astype(str)
-for stock in stock_list[1:]:
-    pre_df = pd.DataFrame(combine_dict[stock])
-    pre_df.set_index('Date', inplace=True)
-    pre_df.index.astype(str)
-    cur_df = cur_df.merge(pre_df, how='left', on='Date')
+        for dt in pd.bdate_range(start_date, end_date, freq="B"):
+            train_df = stock_df[stock_df.index < dt]
+            if len(train_df) <= time_step + 1:
+                continue
+            prediction = DL_train(
+                train_df,
+                time_step=time_step,
+                epochs=epochs,
+                batch_size=batch_size,
+            )
+            combine_dict[stock][f"{stock}_pred"].append(prediction)
+            combine_dict[stock]["Date"].append(dt)
 
-cur_df.to_csv(f'{OUTPUT_STOCK_PREDICTION_FILE}/stock_prediction.csv')
+    current_df = pd.DataFrame(combine_dict[STOCK_LIST[0]]).set_index("Date")
+
+    for stock in STOCK_LIST[1:]:
+        prediction_df = pd.DataFrame(combine_dict[stock]).set_index("Date")
+        current_df = current_df.merge(prediction_df, how="left", on="Date")
+
+    return current_df
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Generate stock return forecasts with LSTM")
+    parser.add_argument("--data-root", type=Path, default=Path("data_v2"))
+    parser.add_argument("--start-date", type=str, default="2021-10-01")
+    parser.add_argument("--end-date", type=str, default="2022-04-01")
+    parser.add_argument("--time-step", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch-size", type=int, default=64)
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    predictions = generate_predictions(
+        data_root=args.data_root,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        time_step=args.time_step,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+    )
+    predictions.to_csv(args.data_root / "stock_prediction.csv")
+
+
+if __name__ == "__main__":
+    main()
